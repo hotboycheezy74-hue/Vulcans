@@ -1,1 +1,1 @@
-# Live Life and Prosper
+# Live Long and Prosper
