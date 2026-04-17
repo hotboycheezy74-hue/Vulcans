@@ -1,0 +1,6 @@
+edu.desu.cis.robot.commands
+edu.desu.cis.robot.control
+edu.desu.cis.robot.core.services
+edu.desu.cis.robot.discovery
+edu.desu.cis.robot.protocol
+edu.desu.cis.robot.service
