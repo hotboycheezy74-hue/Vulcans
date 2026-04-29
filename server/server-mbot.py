@@ -9,9 +9,9 @@ import _thread
 
 
 # --- Configuration ---
-WIFI_SSID = "mbots"
-WIFI_PASSWORD = "pemacs-mbots"
-ROBOT_ID = "StingBot"
+WIFI_SSID = "GTW"
+WIFI_PASSWORD = "GOTTAWIN"
+ROBOT_ID = "Vulcans"
 DISCOVERY_PORT = 9998
 COMMAND_PORT = 9990
 TELEMETRY_PORT = 9991
@@ -270,21 +270,21 @@ class MBotServer:
                 cyberpi.console.print("Accepted connection from " + addr[0])
                 conn.settimeout(300)
 
-                buf = ""                              # accumulation buffer
+                buf = ""
                 while True:
                     chunk = conn.recv(BUFFER_SIZE)
                     if not chunk:
                         break
 
-                    buf += chunk.decode("utf-8")     #  append to buffer
+                    buf += chunk.decode("utf-8")
 
-                    while "\n" in buf:               # process all complete messages
+                    while "\n" in buf:
                         line, buf = buf.split("\n", 1)
                         line = line.strip()
                         if not line:
                             continue
 
-                        msg = json.loads(line)       # now guaranteed to be one full message
+                        msg = json.loads(line)
                         if msg.get("type") != "COMMAND":
                             continue
 
@@ -424,15 +424,6 @@ COMMAND_HANDLERS = {}
 
 
 def register_command(command_name):
-    """Decorator to register a command handler.
-
-    Usage:
-        @register_command("MY_COMMAND")
-        def handle_my_command(payload):
-            params = payload.get("parameters", {})
-            ...
-            return ok_response("Done")
-    """
     def decorator(func):
         COMMAND_HANDLERS[command_name] = func
         return func
@@ -593,10 +584,9 @@ def handle_set_motor_power(payload):
             arbiter.release("motors", "CMD_POWER")
 
 
-
 def turn(angle):
     if angle != 180:
-        angle = (angle +180) % 360 - 180 # Normalize to (-180, 180]
+        angle = (angle + 180) % 360 - 180  # Normalize to (-180, 180]
     kp = 0.35
     min_power = 15
     max_power = 30
@@ -605,9 +595,9 @@ def turn(angle):
     while True:
         current_angle = cyberpi.get_yaw()
         if angle > 0:
-            current_angle = current_angle if current_angle >= 0 else 180 + (current_angle % 180) 
+            current_angle = current_angle if current_angle >= 0 else 180 + (current_angle % 180)
         elif angle < 0:
-            current_angle = current_angle if current_angle <= 0  else -180 + (current_angle % -180)
+            current_angle = current_angle if current_angle <= 0 else -180 + (current_angle % -180)
         error = angle - current_angle
         if abs(error) < 1:
             break
@@ -645,16 +635,17 @@ def move_and_turn(speed, t=0, diff=20, is_left=True):
         time.sleep(t)
         mbot2.drive_speed(0, 0)
 
+
 @register_command("MOVE_AND_TURN")
 def handle_move_and_turn(payload):
     if arbiter.acquire("motors", "MOVE_AND_TURN", 50):
         try:
             params = payload["parameters"]
-            speed = params.get("speed",50)
-            diff = params.get("diff",20)
-            t = params.get("duration",0)
+            speed = params.get("speed", 50)
+            diff = params.get("diff", 20)
+            t = params.get("duration", 0)
             is_left = params.get("is_left", False)
-            move_and_turn(speed = speed, t = t, diff= diff, is_left= is_left)
+            move_and_turn(speed=speed, t=t, diff=diff, is_left=is_left)
             return ok_response("Turn command completed")
         finally:
             arbiter.release("motors", "MOVE_AND_TURN")
@@ -680,7 +671,7 @@ def handle_camera_led(payload):
             elif status == "OFF":
                 mbuild.smart_camera.close_light()
             else:
-                return error_response("UNKONWN_STATUS",
+                return error_response("UNKNOWN_STATUS",
                                       str(status) + " status not known")
             return ok_response("Camera LED is " + status)
         finally:
@@ -782,39 +773,14 @@ server.start()
 
 
 # ################################################################
-# EXTENSION ZONE — Add custom commands below this line
-# ################################################################
-#
-# Use the @register_command decorator to add new commands.
-# Each handler receives a `payload` dict and must return either
-# ok_response(...) or error_response(...).
-#
-# Template:
-#
-#   @register_command("MY_COMMAND")
-#   def handle_my_command(payload):
-#       params = payload.get("parameters", {})
-#       # your logic here
-#       return ok_response("Done", {"key": "value"})
-#
-# For behaviors (looping background tasks), define a behavior
-# function and start it with the scheduler:
-#
-#   def my_behavior():
-#       # called repeatedly until stopped
-#       pass
-#
-#   @register_command("MY_BEHAVIOR")
-#   def handle_start_my_behavior(payload):
-#       scheduler.start_behavior("MY_BEHAVIOR", my_behavior)
-#       return ok_response("My behavior started")
-#
+# EXTENSION ZONE
 # ################################################################
 
 # ============================================================
 # Behavior Functions
 # ============================================================
 
+# --- Avoid Crashing ---
 def avoid_crashing_behavior(threshold):
     if not arbiter.acquire("ultrasonic", "AVOID_CRASH", 250, blocking=False):
         return
@@ -833,15 +799,16 @@ def avoid_crashing_behavior(threshold):
     finally:
         arbiter.release("motors", "AVOID_CRASH")
 
+
 @register_command("AVOID_CRASHING")
 def handle_avoid_crashing(payload):
     params = payload.get("parameters", {})
     threshold = params.get("threshold", 15)
-    scheduler.start_behavior("AVOID_CRASHING", avoid_crashing_behavior,
-                             threshold)
+    scheduler.start_behavior("AVOID_CRASHING", avoid_crashing_behavior, threshold)
     return ok_response("Avoiding crashes")
 
 
+# --- Stop At Line ---
 def stop_at_line_behavior():
     if not arbiter.acquire("line", "STOP_AT_LINE", 150, blocking=False):
         return
@@ -854,7 +821,7 @@ def stop_at_line_behavior():
         return
     try:
         if status > 0:
-            mbot2.drive_speed(0,0)
+            mbot2.drive_speed(0, 0)
     finally:
         arbiter.release("motors", "STOP_AT_LINE")
 
@@ -863,3 +830,191 @@ def stop_at_line_behavior():
 def handle_stop_at_line(payload):
     scheduler.start_behavior("STOP_AT_LINE", stop_at_line_behavior)
     return ok_response("STOP_AT_LINE behavior started")
+
+
+# --- Flash LED ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
+@register_command("FLASH_LED")
+def handle_flash_led(payload):
+    params = payload.get("parameters", {})
+    times = int(params.get("times", 3))
+    r = int(params.get("red", 0))
+    g = int(params.get("green", 0))
+    b = int(params.get("blue", 255))
+    delay = float(params.get("delay", 0.3))
+    if times < 1 or times > 20:
+        return error_response("INVALID_PARAM", "times must be between 1 and 20")
+    if arbiter.acquire("led", "FLASH_LED", 50):
+        try:
+            for _ in range(times):
+                cyberpi.led.on(r, g, b, id="all")
+                time.sleep(delay)
+                cyberpi.led.off(id="all")
+                time.sleep(delay)
+            return ok_response("Flash complete")
+        finally:
+            arbiter.release("led", "FLASH_LED")
+
+
+# --- Steer Around ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
+def steer_around_behavior(threshold, speed, diff):
+    if not arbiter.acquire("ultrasonic", "STEER_AROUND", 200, blocking=False):
+        return
+    try:
+        distance = mbuild.ultrasonic2.get()
+    finally:
+        arbiter.release("ultrasonic", "STEER_AROUND")
+
+    if not arbiter.acquire("motors", "STEER_AROUND", 200, blocking=False):
+        return
+    try:
+        if distance > threshold:
+            mbot2.drive_speed(speed, -speed)
+        else:
+            move_and_turn(speed=speed, diff=diff, is_left=True)
+    finally:
+        arbiter.release("motors", "STEER_AROUND")
+
+
+@register_command("STEER_AROUND")
+def handle_steer_around(payload):
+    params = payload.get("parameters", {})
+    threshold = float(params.get("threshold", 25))
+    speed = float(params.get("speed", 40))
+    diff = float(params.get("diff", 20))
+    if speed < 0 or speed > 100:
+        return error_response("INVALID_PARAM", "speed must be between 0 and 100")
+    if diff < 0 or diff >= speed:
+        return error_response("INVALID_PARAM", "diff must be >= 0 and less than speed")
+    scheduler.start_behavior("STEER_AROUND", steer_around_behavior, threshold, speed, diff)
+    return ok_response("STEER_AROUND started")
+
+
+# --- Push Object ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
+@register_command("PUSH_OBJECT")
+def handle_push_object(payload):
+    if not arbiter.acquire("ultrasonic", "PUSH_OBJECT", 100, blocking=True):
+        return error_response("RESOURCE_BUSY", "Ultrasonic busy")
+    try:
+        distance = mbuild.ultrasonic2.get()
+    finally:
+        arbiter.release("ultrasonic", "PUSH_OBJECT")
+
+    if distance > 15:
+        return ok_response("No object detected")
+
+    if arbiter.acquire("motors", "PUSH_OBJECT", 100, blocking=True):
+        try:
+            turn(180)
+            mbot2.straight(-(distance * 1.3))
+            move_and_turn(speed=40, diff=20, is_left=True)
+            time.sleep(4)
+            mbot2.straight(distance * 1.3)
+            turn(180)
+            return ok_response("Object pushed")
+        finally:
+            arbiter.release("motors", "PUSH_OBJECT")
+    return error_response("RESOURCE_BUSY", "Motors busy")
+
+
+# ============================================================
+# NEW: Line Follow Behavior
+# Keeps robot inside maze using the quad RGB line sensor.
+# offset > 0 means drifting right, offset < 0 means drifting left.
+# ============================================================
+
+def line_follow_behavior():
+    if not arbiter.acquire("line", "LINE_FOLLOW", 150, blocking=False):
+        return
+    try:
+        offset = mbuild.quad_rgb_sensor.get_offset_track()
+        status = mbuild.quad_rgb_sensor.get_line_sta()
+    finally:
+        arbiter.release("line", "LINE_FOLLOW")
+
+    if not arbiter.acquire("motors", "LINE_FOLLOW", 150, blocking=False):
+        return
+    try:
+        if status == 0:
+            # Lost the line — stop and wait
+            mbot2.drive_speed(0, 0)
+        else:
+            speed = 40
+            kp = 0.8
+            correction = kp * offset
+            # Positive correction steers left, negative steers right
+            mbot2.drive_speed(speed + correction, -(speed - correction))
+    finally:
+        arbiter.release("motors", "LINE_FOLLOW")
+
+
+@register_command("LINE_FOLLOW")
+def handle_line_follow(payload):
+    scheduler.start_behavior("LINE_FOLLOW", line_follow_behavior)
+    return ok_response("Line follow started")
+
+
+# ============================================================
+# NEW: Detect Sample Behavior
+# Continuously scans with camera.
+# RED cup  = Dilithium sample found  → LED red  + beep, stop moving
+# YELLOW ball = Back at insertion point → LED yellow, stop all
+# GREEN cup/ball = Movable obstacle   → trigger PUSH_OBJECT
+# BLUE cup/ball  = Immovable obstacle → treat as wall (STEER_AROUND handles it)
+# ============================================================
+
+def detect_sample_behavior():
+    if not arbiter.acquire("camera", "DETECT_SAMPLE", 120, blocking=False):
+        return
+    try:
+        ball = detect_color(needs_light=True)
+    finally:
+        arbiter.release("camera", "DETECT_SAMPLE")
+
+    color = ball["color"]
+
+    if color == "RED":
+        # Found the Dilithium sample!
+        cyberpi.console.print("SAMPLE FOUND!")
+        cyberpi.led.on(255, 0, 0, id="all")   # Red LED
+        cyberpi.play_tone(440, 1)              # Audible cue (required by rubric)
+        scheduler.stop_behavior("LINE_FOLLOW")
+        scheduler.stop_behavior("DETECT_SAMPLE")
+        mbot2.drive_speed(0, 0)
+
+    elif color == "YELLOW":
+        # Back at insertion point — mission complete!
+        cyberpi.console.print("INSERTION POINT - MISSION COMPLETE!")
+        cyberpi.led.on(255, 255, 0, id="all")  # Yellow LED
+        cyberpi.play_tone(880, 1)
+        scheduler.stop_all()
+
+    elif color == "GREEN":
+        # Movable obstacle — push it out of the way
+        cyberpi.console.print("GREEN obstacle detected - pushing")
+        scheduler.stop_behavior("LINE_FOLLOW")
+        handle_push_object({"parameters": {}})
+        # Resume line following after push
+        scheduler.start_behavior("LINE_FOLLOW", line_follow_behavior)
+
+
+@register_command("DETECT_SAMPLE")
+def handle_detect_sample(payload):
+    scheduler.start_behavior("DETECT_SAMPLE", detect_sample_behavior)
+    return ok_response("Sample detection started")
+
+
+# ============================================================
+# NEW: Full Auto Mission
+# Single command to start the complete autonomous mission:
+# line following + sample detection + crash avoidance together.
+# ============================================================
+
+@register_command("START_MISSION")
+def handle_start_mission(payload):
+    params = payload.get("parameters", {})
+    crash_threshold = params.get("threshold", 8)
+    scheduler.start_behavior("LINE_FOLLOW", line_follow_behavior)
+    scheduler.start_behavior("DETECT_SAMPLE", detect_sample_behavior)
+    scheduler.start_behavior("AVOID_CRASHING", avoid_crashing_behavior, crash_threshold)
+    cyberpi.console.print("Mission started!")
+    return ok_response("Mission started — line following, sample detection, crash avoidance active")
