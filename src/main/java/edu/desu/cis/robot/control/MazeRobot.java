@@ -3,6 +3,11 @@ package edu.desu.cis.robot.control;
 import edu.desu.cis.robot.service.SensorSnapshot;
 
 public class MazeRobot extends RobotController {
+    private static final double OBSTACLE_DISTANCE_CM = 15.0;
+    private static final double STEER_AROUND_THRESHOLD_CM = 25.0;
+    private static final double STEER_AROUND_SPEED = 40.0;
+    private static final double STEER_AROUND_DIFF = 20.0;
+    private boolean lineFollowActive = false;
 
     // Robot states
     private enum RobotState {
@@ -22,48 +27,28 @@ public class MazeRobot extends RobotController {
         super(robotName);
     }
 
-    // ============================================================
-    // Helper: push a movable obstacle using existing MBot2 methods
-    // Backs up, arcs around, then realigns
-    // ============================================================
-    private void pushMovableObstacle(double distanceToCm) {
-        mbot.straight(-(distanceToCm * 1.3));       // back up
-        mbot.moveAndTurnLeft(40, 2.0, 20);           // arc left beside object
-        mbot.straight(distanceToCm * 1.3);           // push forward past it
-        mbot.moveAndTurnRight(40, 2.0, 20);          // arc right to realign
-    }
-
-    // ============================================================
-    // Helper: steer around an immovable obstacle
-    // ============================================================
-    private void steerAroundObstacle() {
-        mbot.turnRight(45);          // turn away from obstacle
-        mbot.forward(40, 1.5);       // move past it
-        mbot.turnLeft(45);           // realign with path
-    }
-
-    // ============================================================
-    // Helper: one step of line following using motor power + offset
-    // Call this repeatedly in the CRUISE loop
-    // ============================================================
-    private void followLineStep() {
-        int offset = mbot.readLineOffsetTrack();
-        int status = mbot.readLineStatus();
-
-        if (status == 0) {
-            mbot.stop();
-            return;
+    private void startLineFollowIfNeeded() {
+        if (!lineFollowActive) {
+            mbot.followLine();
+            lineFollowActive = true;
         }
+    }
 
-        double speed = 40;
-        double kp = 0.8;
-        double correction = kp * offset;
-        mbot.setMotorPower(speed + correction, speed - correction);
+    private void stopLineFollowIfNeeded() {
+        if (lineFollowActive) {
+            mbot.stopBehavior("LINE_FOLLOW");
+            lineFollowActive = false;
+        }
+    }
+
+    private void resetCruiseBehaviors() {
+        mbot.avoidCrashing(OBSTACLE_DISTANCE_CM);
+        lineFollowActive = false;
     }
 
     public void run() {
 
-        mbot.avoidCrashing(15);
+        resetCruiseBehaviors();
         currentState = RobotState.CRUISE;
 
         while (currentState != RobotState.STOP) {
@@ -73,8 +58,9 @@ public class MazeRobot extends RobotController {
             switch (currentState) {
 
                 case CRUISE:
-                    followLineStep();
-                    if (s.distance() <= 15) {
+                    startLineFollowIfNeeded();
+                    if (s.distance() <= OBSTACLE_DISTANCE_CM) {
+                        stopLineFollowIfNeeded();
                         mbot.stop();
                         currentState = RobotState.IDENTIFY_OBJECT;
                     }
@@ -98,14 +84,16 @@ public class MazeRobot extends RobotController {
                     break;
 
                 case PUSH_OBJECT:
-                    pushMovableObstacle(s.distance());
-                    mbot.avoidCrashing(15);
+                    mbot.pushObject();
+                    resetCruiseBehaviors();
                     currentState = RobotState.CRUISE;
                     break;
 
                 case AVOID_OBJECT:
-                    steerAroundObstacle();
-                    mbot.avoidCrashing(15);
+                    mbot.steerAround(STEER_AROUND_THRESHOLD_CM,
+                            STEER_AROUND_SPEED,
+                            STEER_AROUND_DIFF);
+                    resetCruiseBehaviors();
                     currentState = RobotState.CRUISE;
                     break;
 
@@ -118,23 +106,26 @@ public class MazeRobot extends RobotController {
 
                 case RETURN_TO_BASE:
                     mbot.turnLeft(180);
-                    mbot.avoidCrashing(15);
+                    resetCruiseBehaviors();
 
                     // Keep scanning until yellow insertion point found
                     String returnColor = mbot.getColorObjectFromCamera(false);
                     while (!returnColor.equals("YELLOW")) {
                         SensorSnapshot rs = awaitNewData();
-                        followLineStep();
+                        startLineFollowIfNeeded();
 
-                        if (rs.distance() <= 15) {
+                        if (rs.distance() <= OBSTACLE_DISTANCE_CM) {
+                            stopLineFollowIfNeeded();
                             mbot.stop();
                             String blockColor = mbot.getColorObjectFromCamera(false);
                             if (blockColor.equals("GREEN")) {
-                                pushMovableObstacle(rs.distance());
+                                mbot.pushObject();
                             } else {
-                                steerAroundObstacle();
+                                mbot.steerAround(STEER_AROUND_THRESHOLD_CM,
+                                        STEER_AROUND_SPEED,
+                                        STEER_AROUND_DIFF);
                             }
-                            mbot.avoidCrashing(15);
+                            resetCruiseBehaviors();
                         }
                         returnColor = mbot.getColorObjectFromCamera(false);
                     }

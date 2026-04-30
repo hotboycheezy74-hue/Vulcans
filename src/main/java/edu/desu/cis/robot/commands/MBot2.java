@@ -463,6 +463,36 @@ public class MBot2 {
     }
 
     /**
+     * Starts the robot's line-follow behavior on the server.
+     */
+    public void followLine() {
+        execute("LINE_FOLLOW", null);
+    }
+
+    /**
+     * Starts the robot's steer-around behavior on the server.
+     * @param thresholdInCm distance threshold for obstacle steering
+     * @param speed forward speed while cruising
+     * @param diff turning differential
+     */
+    public void steerAround(double thresholdInCm, double speed, double diff) {
+        execute("STEER_AROUND",
+                Map.of(
+                        "threshold", thresholdInCm,
+                        "speed", speed,
+                        "diff", diff
+                )
+        );
+    }
+
+    /**
+     * Runs the server-side push-object routine.
+     */
+    public void pushObject() {
+        execute("PUSH_OBJECT", null);
+    }
+
+    /**
      * Stops a specific behavior on the robot.
      * @param behaviorName The name of the behavior to stop.
      */
