@@ -26,6 +26,31 @@ COLOR_NAMES = {
 }
 
 
+def load_behavior_helper(filename, expected_name):
+    """
+    Best-effort loader for behavior helper files that may live beside
+    server-mbot.py in the project workspace. If the file is not available
+    on the robot, the main server falls back to its inline implementation.
+    """
+    namespace = {}
+    try:
+        with open(filename, "r", encoding="utf-8") as helper_file:
+            exec(helper_file.read(), namespace)
+        return namespace.get(expected_name)
+    except Exception:
+        return None
+
+
+push_movable_object_helper = load_behavior_helper(
+    "push moveable object.py",
+    "push_movable_object"
+)
+avoid_immovable_object_helper = load_behavior_helper(
+    "avoid imooveable object.py",
+    "avoid_immovable_object"
+)
+
+
 # ============================================================
 # Resource Arbiter (thread-safe, owner + priority)
 # ============================================================
@@ -95,11 +120,16 @@ broker = PubSubBroker()
 class TelemetryStreamer:
 
     def __init__(self):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock = None
         self.clients = set()
         self.running = True
         broker.subscribe("telemetry", self.send)
-        _thread.start_new_thread(self.loop, ())
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            _thread.start_new_thread(self.loop, ())
+        except Exception as exc:
+            self.running = False
+            cyberpi.console.print("Telemetry disabled: %s\n" % exc)
 
     def stop(self):
         cyberpi.console.print("Stopping telemetry...\n")
@@ -114,6 +144,8 @@ class TelemetryStreamer:
         self.clients.add(addr)
 
     def send(self, data):
+        if self.sock is None:
+            return
         msg = json.dumps(data).encode()
         for c in self.clients:
             try:
@@ -867,10 +899,26 @@ def steer_around_behavior(threshold, speed, diff):
     if not arbiter.acquire("motors", "STEER_AROUND", 200, blocking=False):
         return
     try:
-        if distance > threshold:
-            mbot2.drive_speed(speed, -speed)
+        if avoid_immovable_object_helper is not None:
+            avoid_immovable_object_helper(
+                distance_cm=distance,
+                mbot2=mbot2,
+                move_and_turn=move_and_turn,
+                threshold_cm=threshold,
+                speed=speed,
+                diff=diff
+            )
         else:
-            move_and_turn(speed=speed, diff=diff, is_left=True)
+            if distance > threshold:
+                mbot2.drive_speed(speed, -speed)
+            else:
+                if distance <= threshold * 0.6:
+                    turn_speed = max(25, speed - 5)
+                    turn_diff = min(turn_speed - 5, diff + 8)
+                    move_and_turn(speed=turn_speed, diff=turn_diff, is_left=False)
+                else:
+                    turn_diff = max(10, diff - 8)
+                    move_and_turn(speed=speed, diff=turn_diff, is_left=False)
     finally:
         arbiter.release("motors", "STEER_AROUND")
 
@@ -904,12 +952,20 @@ def handle_push_object(payload):
 
     if arbiter.acquire("motors", "PUSH_OBJECT", 100, blocking=True):
         try:
-            turn(180)
-            mbot2.straight(-(distance * 1.3))
-            move_and_turn(speed=40, diff=20, is_left=True)
-            time.sleep(4)
-            mbot2.straight(distance * 1.3)
-            turn(180)
+            if push_movable_object_helper is not None:
+                push_movable_object_helper(
+                    distance_cm=distance,
+                    mbot2=mbot2,
+                    turn=turn,
+                    move_and_turn=move_and_turn
+                )
+            else:
+                turn(180)
+                mbot2.straight(-(distance * 1.3))
+                move_and_turn(speed=40, diff=20, is_left=True)
+                time.sleep(4)
+                mbot2.straight(distance * 1.3)
+                turn(180)
             return ok_response("Object pushed")
         finally:
             arbiter.release("motors", "PUSH_OBJECT")
