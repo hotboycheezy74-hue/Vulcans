@@ -9,8 +9,8 @@ import _thread
 
 
 # --- Configuration ---
-WIFI_SSID = "Bangura wifi"
-WIFI_PASSWORD = "Bangura@123"
+WIFI_SSID = "CIS_WiFi"
+WIFI_PASSWORD = "CIS!2018#WiFi"
 ROBOT_ID = "Vulcans"
 DISCOVERY_PORT = 9998
 COMMAND_PORT = 9990
@@ -24,31 +24,6 @@ COLOR_NAMES = {
     3: "BLUE",
     4: "YELLOW"
 }
-
-
-def load_behavior_helper(filename, expected_name):
-    """
-    Best-effort loader for behavior helper files that may live beside
-    server-mbot.py in the project workspace. If the file is not available
-    on the robot, the main server falls back to its inline implementation.
-    """
-    namespace = {}
-    try:
-        with open(filename, "r", encoding="utf-8") as helper_file:
-            exec(helper_file.read(), namespace)
-        return namespace.get(expected_name)
-    except Exception:
-        return None
-
-
-push_movable_object_helper = load_behavior_helper(
-    "push moveable object.py",
-    "push_movable_object"
-)
-avoid_immovable_object_helper = load_behavior_helper(
-    "avoid imooveable object.py",
-    "avoid_immovable_object"
-)
 
 
 # ============================================================
@@ -122,14 +97,17 @@ class TelemetryStreamer:
     def __init__(self):
         self.sock = None
         self.clients = set()
-        self.running = True
-        broker.subscribe("telemetry", self.send)
+        self.running = False
         try:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.running = True
+            broker.subscribe("telemetry", self.send)
             _thread.start_new_thread(self.loop, ())
-        except Exception as exc:
-            self.running = False
-            cyberpi.console.print("Telemetry disabled: %s\n" % exc)
+        except Exception as ex:
+            try:
+                cyberpi.console.print("Telemetry disabled: " + str(ex))
+            except Exception:
+                pass
 
     def stop(self):
         cyberpi.console.print("Stopping telemetry...\n")
@@ -320,6 +298,12 @@ class MBotServer:
                         if msg.get("type") != "COMMAND":
                             continue
 
+                        command_name = msg["payload"].get("command", "UNKNOWN")
+                        try:
+                            cyberpi.console.print("CMD: " + command_name)
+                        except Exception:
+                            pass
+
                         msg["payload"].setdefault("parameters", {})
                         msg["payload"]["parameters"]["client_ip"] = addr[0]
                         response_payload = handle_command(msg["payload"])
@@ -334,7 +318,15 @@ class MBotServer:
                         conn.sendall((json.dumps(response) + "\n").encode())
 
             except Exception as e:
-                cyberpi.console.print("Error in TCP connection: " + str(e))
+                try:
+                    cyberpi.console.print(
+                        "Error in TCP connection after "
+                        + str(command_name)
+                        + ": "
+                        + str(e)
+                    )
+                except Exception:
+                    cyberpi.console.print("Error in TCP connection: " + str(e))
             finally:
                 if conn:
                     cyberpi.console.print("Closing connection.")
@@ -756,10 +748,11 @@ def handle_telemetry(payload):
 def handle_stop_behavior(payload):
     parameters = payload.get("parameters")
     behavior_name = parameters.get("behavior_name")
+    scheduler.stop_behavior(behavior_name)
+    scheduler.wait_until_stopped(behavior_name)
     if arbiter.acquire("motors", "LINE", 180):
         mbot2.forward(speed=0)
         arbiter.release("motors", "LINE")
-    scheduler.stop_behavior(behavior_name)
     return ok_response("Behavior " + behavior_name + " stopped")
 
 
@@ -836,6 +829,7 @@ def avoid_crashing_behavior(threshold):
 def handle_avoid_crashing(payload):
     params = payload.get("parameters", {})
     threshold = params.get("threshold", 15)
+    stop_behaviors_and_wait("STOP_AT_LINE")
     scheduler.start_behavior("AVOID_CRASHING", avoid_crashing_behavior, threshold)
     return ok_response("Avoiding crashes")
 
@@ -860,6 +854,7 @@ def stop_at_line_behavior():
 
 @register_command("STOP_AT_LINE")
 def handle_stop_at_line(payload):
+    stop_behaviors_and_wait("AVOID_CRASHING")
     scheduler.start_behavior("STOP_AT_LINE", stop_at_line_behavior)
     return ok_response("STOP_AT_LINE behavior started")
 
@@ -887,6 +882,23 @@ def handle_flash_led(payload):
             arbiter.release("led", "FLASH_LED")
 
 
+@register_command("PLAY_TONE")
+def handle_play_tone(payload):
+    params = payload.get("parameters", {})
+    frequency = int(params.get("frequency", 440))
+    duration = float(params.get("duration", 1.0))
+    if frequency < 50 or frequency > 5000:
+        return error_response("INVALID_PARAM", "frequency must be between 50 and 5000")
+    if duration <= 0 or duration > 5:
+        return error_response("INVALID_PARAM", "duration must be between 0 and 5")
+    if arbiter.acquire("speaker", "PLAY_TONE", 50):
+        try:
+            cyberpi.play_tone(frequency, duration)
+            return ok_response("Tone complete")
+        finally:
+            arbiter.release("speaker", "PLAY_TONE")
+
+
 # --- Steer Around ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
 def steer_around_behavior(threshold, speed, diff):
     if not arbiter.acquire("ultrasonic", "STEER_AROUND", 200, blocking=False):
@@ -899,26 +911,10 @@ def steer_around_behavior(threshold, speed, diff):
     if not arbiter.acquire("motors", "STEER_AROUND", 200, blocking=False):
         return
     try:
-        if avoid_immovable_object_helper is not None:
-            avoid_immovable_object_helper(
-                distance_cm=distance,
-                mbot2=mbot2,
-                move_and_turn=move_and_turn,
-                threshold_cm=threshold,
-                speed=speed,
-                diff=diff
-            )
+        if distance > threshold:
+            mbot2.drive_speed(speed, -speed)
         else:
-            if distance > threshold:
-                mbot2.drive_speed(speed, -speed)
-            else:
-                if distance <= threshold * 0.6:
-                    turn_speed = max(25, speed - 5)
-                    turn_diff = min(turn_speed - 5, diff + 8)
-                    move_and_turn(speed=turn_speed, diff=turn_diff, is_left=False)
-                else:
-                    turn_diff = max(10, diff - 8)
-                    move_and_turn(speed=speed, diff=turn_diff, is_left=False)
+            move_and_turn(speed=speed, diff=diff, is_left=True)
     finally:
         arbiter.release("motors", "STEER_AROUND")
 
@@ -933,6 +929,7 @@ def handle_steer_around(payload):
         return error_response("INVALID_PARAM", "speed must be between 0 and 100")
     if diff < 0 or diff >= speed:
         return error_response("INVALID_PARAM", "diff must be >= 0 and less than speed")
+    stop_behaviors_and_wait("LINE_FOLLOW", "AVOID_CRASHING", "STOP_AT_LINE", "DETECT_SAMPLE")
     scheduler.start_behavior("STEER_AROUND", steer_around_behavior, threshold, speed, diff)
     return ok_response("STEER_AROUND started")
 
@@ -940,6 +937,10 @@ def handle_steer_around(payload):
 # --- Push Object ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
 @register_command("PUSH_OBJECT")
 def handle_push_object(payload):
+    PUSH_APPROACH_MULTIPLIER = 1.3
+    PUSH_RETURN_MULTIPLIER = 1.5
+    PUSH_CLEAR_SECONDS = 5.0
+    stop_behaviors_and_wait("LINE_FOLLOW", "AVOID_CRASHING", "STOP_AT_LINE", "DETECT_SAMPLE", "STEER_AROUND")
     if not arbiter.acquire("ultrasonic", "PUSH_OBJECT", 100, blocking=True):
         return error_response("RESOURCE_BUSY", "Ultrasonic busy")
     try:
@@ -952,20 +953,17 @@ def handle_push_object(payload):
 
     if arbiter.acquire("motors", "PUSH_OBJECT", 100, blocking=True):
         try:
-            if push_movable_object_helper is not None:
-                push_movable_object_helper(
-                    distance_cm=distance,
-                    mbot2=mbot2,
-                    turn=turn,
-                    move_and_turn=move_and_turn
-                )
-            else:
-                turn(180)
-                mbot2.straight(-(distance * 1.3))
-                move_and_turn(speed=40, diff=20, is_left=True)
-                time.sleep(4)
-                mbot2.straight(distance * 1.3)
-                turn(180)
+            # Turn around so the back of the robot can do the pushing work.
+            turn(180)
+            mbot2.straight(-(distance * PUSH_APPROACH_MULTIPLIER))
+            # Push the object out of the lane to the left.
+            move_and_turn(speed=40, diff=20, is_left=True)
+            time.sleep(PUSH_CLEAR_SECONDS)
+            # Return a little farther than the straight-in distance so line follow
+            # has a better chance to reacquire the maze path cleanly.
+            mbot2.straight(distance * PUSH_RETURN_MULTIPLIER)
+            turn(180)
+            mbot2.drive_speed(0, 0)
             return ok_response("Object pushed")
         finally:
             arbiter.release("motors", "PUSH_OBJECT")
@@ -1006,14 +1004,14 @@ line_settle_cycles = 0
 def line_follow_behavior():
     global line_last_status, line_right_turn_mode, line_settle_cycles
 
-    if not arbiter.acquire("line", "LINE_FOLLOW", 150, blocking=False):
+    if not arbiter.acquire("line", "LINE_FOLLOW", 300, blocking=False):
         return
     try:
         status = mbuild.quad_rgb_sensor.get_line_sta()
     finally:
         arbiter.release("line", "LINE_FOLLOW")
 
-    if not arbiter.acquire("motors", "LINE_FOLLOW", 150, blocking=False):
+    if not arbiter.acquire("motors", "LINE_FOLLOW", 300, blocking=False):
         return
     try:
         if status == 0 and line_last_status == 1:
@@ -1055,6 +1053,7 @@ def line_follow_behavior():
 
 @register_command("LINE_FOLLOW")
 def handle_line_follow(payload):
+    stop_behaviors_and_wait("STOP_AT_LINE", "AVOID_CRASHING", "STEER_AROUND")
     scheduler.start_behavior("LINE_FOLLOW", line_follow_behavior)
     return ok_response("Line follow started")
 
@@ -1105,6 +1104,7 @@ def detect_sample_behavior():
 
 @register_command("DETECT_SAMPLE")
 def handle_detect_sample(payload):
+    stop_behaviors_and_wait("STEER_AROUND")
     scheduler.start_behavior("DETECT_SAMPLE", detect_sample_behavior)
     return ok_response("Sample detection started")
 

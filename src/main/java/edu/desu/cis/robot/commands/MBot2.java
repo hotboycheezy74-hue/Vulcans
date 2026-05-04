@@ -551,4 +551,19 @@ public class MBot2 {
         );
     }
 
+    /**
+     * Plays a tone on the robot speaker.
+     *
+     * @param frequency tone frequency in Hz
+     * @param duration tone duration in seconds
+     */
+    public void playTone(int frequency, double duration) {
+        execute("PLAY_TONE",
+                Map.of(
+                        "frequency", frequency,
+                        "duration", duration
+                )
+        );
+    }
+
 }

@@ -3,30 +3,37 @@ package edu.desu.cis.robot.control;
 import edu.desu.cis.robot.service.SensorSnapshot;
 
 public class MazeRobot extends RobotController {
-    private static final double OBSTACLE_DISTANCE_CM = 15.0;
+    private static final double OBSTACLE_DISTANCE_CM = 14.0;
     private static final double STEER_AROUND_THRESHOLD_CM = 25.0;
     private static final double STEER_AROUND_SPEED = 40.0;
-    private static final double STEER_AROUND_DIFF = 25.0;
-    private static final long STEER_AROUND_DURATION_MS = 2500;
-    private static final long PUSH_OBJECT_DURATION_MS = 4500;
-    private static final int IDENTIFY_ATTEMPTS = 3;
-    private static final long IDENTIFY_DELAY_MS = 200;
-    private boolean lineFollowActive = false;
-    private boolean carryingSample = false;
-    private boolean returnHeadingEstablished = false;
+    private static final double STEER_AROUND_DIFF = 20.0;
+    private static final long STEER_AROUND_DURATION_MS = 3000;
+    private static final long PUSH_OBJECT_DURATION_MS = 5000;
+    private static final double SAMPLE_APPROACH_BUFFER_CM = 2.0;
+    private static final String SAMPLE_COLOR = "RED";
+    private static final String MOVABLE_COLOR = "GREEN";
+    private static final String IMMOVABLE_COLOR = "BLUE";
+    private static final String INSERTION_POINT_COLOR = "YELLOW";
+    private static final double IDENTIFY_CREEP_CM = 1.5;
+    private static final double MIN_IDENTIFY_DISTANCE_CM = 6.0;
+    private static final int IDENTIFY_APPROACH_STEPS = 4;
+    private static final int CAMERA_READ_ATTEMPTS = 5;
+    private static final long CAMERA_READ_DELAY_MS = 200;
 
-    // Robot states
     private enum RobotState {
         CRUISE,
         IDENTIFY_OBJECT,
-        PUSH_OBJECT,
+        MOVE_OBJECT,
         AVOID_OBJECT,
-        FIND_SAMPLE,
+        COLLECT_SAMPLE,
         RETURN_TO_BASE,
-        STOP
+        MISSION_COMPLETE
     }
 
     private RobotState currentState = RobotState.CRUISE;
+    private boolean lineFollowActive = false;
+    private boolean carryingSample = false;
+    private boolean returnHeadingEstablished = false;
 
     public MazeRobot(String robotName) {
         super(robotName);
@@ -47,26 +54,48 @@ public class MazeRobot extends RobotController {
     }
 
     private void resetCruiseBehaviors() {
-        mbot.avoidCrashing(OBSTACLE_DISTANCE_CM);
         lineFollowActive = false;
+    }
+
+    private boolean isObstacleAhead(double distance) {
+        return !Double.isNaN(distance) && distance > 0 && distance <= OBSTACLE_DISTANCE_CM;
+    }
+
+    private double safeApproachDistance(double distance) {
+        if (Double.isNaN(distance) || distance <= SAMPLE_APPROACH_BUFFER_CM) {
+            return 0;
+        }
+        return distance - SAMPLE_APPROACH_BUFFER_CM;
     }
 
     private RobotState resumeStateAfterObject() {
         return carryingSample ? RobotState.RETURN_TO_BASE : RobotState.CRUISE;
     }
 
-    private String readObjectColor() {
-        for (int attempt = 0; attempt < IDENTIFY_ATTEMPTS; attempt++) {
+    private void collectSample(double distance) {
+        mbot.straight(safeApproachDistance(distance));
+        mbot.flashLed(5, 255, 0, 0, 0.3);
+        carryingSample = true;
+        mbot.turnLeft(180);
+        returnHeadingEstablished = true;
+    }
+
+    private boolean insertionPointReached(String color) {
+        return INSERTION_POINT_COLOR.equals(color);
+    }
+
+    private String readStableCameraColor() {
+        for (int attempt = 0; attempt < CAMERA_READ_ATTEMPTS; attempt++) {
             String color = mbot.getColorObjectFromCamera(true);
-            if (color.equals("GREEN")
-                    || color.equals("BLUE")
-                    || color.equals("RED")
-                    || color.equals("YELLOW")) {
+            if (MOVABLE_COLOR.equals(color)
+                    || IMMOVABLE_COLOR.equals(color)
+                    || SAMPLE_COLOR.equals(color)
+                    || INSERTION_POINT_COLOR.equals(color)) {
                 return color;
             }
 
             try {
-                Thread.sleep(IDENTIFY_DELAY_MS);
+                Thread.sleep(CAMERA_READ_DELAY_MS);
             } catch (InterruptedException ignored) {
                 Thread.currentThread().interrupt();
                 break;
@@ -75,47 +104,76 @@ public class MazeRobot extends RobotController {
         return "";
     }
 
+    private String identifyObjectCautiously() {
+        for (int step = 0; step < IDENTIFY_APPROACH_STEPS; step++) {
+            String color = readStableCameraColor();
+            if (MOVABLE_COLOR.equals(color)
+                    || IMMOVABLE_COLOR.equals(color)
+                    || SAMPLE_COLOR.equals(color)
+                    || INSERTION_POINT_COLOR.equals(color)) {
+                return color;
+            }
+
+            double distance = mbot.readUltrasonic();
+            if (Double.isNaN(distance) || distance <= MIN_IDENTIFY_DISTANCE_CM) {
+                break;
+            }
+
+            mbot.straight(IDENTIFY_CREEP_CM);
+            mbot.stop();
+        }
+
+        return "";
+    }
+
+    private void pauseLoop() {
+        try {
+            Thread.sleep(50);
+        } catch (InterruptedException ignored) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    @Override
     public void run() {
+        mbot.avoidCrashing(15);
+        mbot.followLine();
 
-        resetCruiseBehaviors();
-        currentState = RobotState.CRUISE;
-
-        while (currentState != RobotState.STOP) {
-
-            SensorSnapshot s = awaitNewData();
+        while (currentState != RobotState.MISSION_COMPLETE) {
+            SensorSnapshot sensor = awaitNewData();
 
             switch (currentState) {
-
                 case CRUISE:
-                    startLineFollowIfNeeded();
-                    if (s.distance() <= OBSTACLE_DISTANCE_CM) {
-                        stopLineFollowIfNeeded();
-                        mbot.stop();
+                    double distance = sensor.distance();
+                    if (isObstacleAhead(distance)) {
+                        mbot.stopAllBehaviors();
                         currentState = RobotState.IDENTIFY_OBJECT;
                     }
                     break;
 
                 case IDENTIFY_OBJECT:
-                    mbot.flashLed(1, 255, 255, 0, 0.15);
-                    String color = readObjectColor();
-                    if (color.equals("GREEN")) {
-                        mbot.flashLed(1, 0, 255, 0, 0.15);
-                        currentState = RobotState.PUSH_OBJECT;
-                    } else if (color.equals("BLUE")) {
-                        mbot.flashLed(1, 0, 0, 255, 0.15);
+
+                    String color = mbot.getColorObjectFromCamera();
+
+                    if (MOVABLE_COLOR.equals(color)) {
+                        mbot.flashLed(1, 0, 255, 0, 0.3);
+                        currentState = RobotState.MOVE_OBJECT;
+                    } else if (IMMOVABLE_COLOR.equals(color)) {
+                        mbot.flashLed(1, 0, 0, 255, 0.3);
                         currentState = RobotState.AVOID_OBJECT;
-                    } else if (color.equals("RED")) {
+                    } else if (SAMPLE_COLOR.equals(color) && !carryingSample) {
                         mbot.flashLed(3, 255, 0, 0, 0.3);
-                        currentState = RobotState.FIND_SAMPLE;
-                    } else if (color.equals("YELLOW") && carryingSample) {
-                        mbot.stopAllBehaviors();
-                        currentState = RobotState.STOP;
+                        currentState = RobotState.COLLECT_SAMPLE;
+                    } else if (INSERTION_POINT_COLOR.equals(color) && carryingSample) {
+                        currentState = RobotState.MISSION_COMPLETE;
                     } else {
-                        currentState = RobotState.AVOID_OBJECT;
+                        mbot.avoidCrashing(15);
+                        mbot.followLine();
+                        currentState = RobotState.CRUISE;
                     }
                     break;
 
-                case PUSH_OBJECT:
+                case MOVE_OBJECT:
                     mbot.pushObject();
                     try {
                         Thread.sleep(PUSH_OBJECT_DURATION_MS);
@@ -129,9 +187,11 @@ public class MazeRobot extends RobotController {
                     break;
 
                 case AVOID_OBJECT:
-                    mbot.steerAround(STEER_AROUND_THRESHOLD_CM,
+                    mbot.steerAround(
+                            STEER_AROUND_THRESHOLD_CM,
                             STEER_AROUND_SPEED,
-                            STEER_AROUND_DIFF);
+                            STEER_AROUND_DIFF
+                    );
                     try {
                         Thread.sleep(STEER_AROUND_DURATION_MS);
                     } catch (InterruptedException ignored) {
@@ -143,12 +203,8 @@ public class MazeRobot extends RobotController {
                     currentState = resumeStateAfterObject();
                     break;
 
-                case FIND_SAMPLE:
-                    // Move to sample and signal found (rubric: audible or visual cue)
-                    mbot.straight(s.distance() - 5);
-                    mbot.flashLed(5, 0, 255, 0, 0.3);
-                    carryingSample = true;
-                    returnHeadingEstablished = false;
+                case COLLECT_SAMPLE:
+                   // collectSample(distance);
                     currentState = RobotState.RETURN_TO_BASE;
                     break;
 
@@ -156,47 +212,42 @@ public class MazeRobot extends RobotController {
                     if (!returnHeadingEstablished) {
                         mbot.turnLeft(180);
                         returnHeadingEstablished = true;
-                        resetCruiseBehaviors();
                     }
+                    resetCruiseBehaviors();
 
-                    // Keep scanning until yellow insertion point found
-                    String returnColor = mbot.getColorObjectFromCamera(false);
-                    while (!returnColor.equals("YELLOW")) {
-                        SensorSnapshot rs = awaitNewData();
+                    while (currentState == RobotState.RETURN_TO_BASE) {
+                        double returnDistance = mbot.readUltrasonic();
                         startLineFollowIfNeeded();
 
-                        if (rs.distance() <= OBSTACLE_DISTANCE_CM) {
+                        String returnColor = readStableCameraColor();
+                        if (insertionPointReached(returnColor)) {
+                            currentState = RobotState.MISSION_COMPLETE;
+                            break;
+                        }
+
+                        if (isObstacleAhead(returnDistance)) {
                             stopLineFollowIfNeeded();
                             mbot.stop();
-                            String blockColor = mbot.getColorObjectFromCamera(false);
-                            if (blockColor.equals("GREEN")) {
-                                mbot.pushObject();
-                            } else {
-                                mbot.steerAround(STEER_AROUND_THRESHOLD_CM,
-                                        STEER_AROUND_SPEED,
-                                        STEER_AROUND_DIFF);
-                            }
-                            resetCruiseBehaviors();
+                            currentState = RobotState.IDENTIFY_OBJECT;
                         }
-                        returnColor = mbot.getColorObjectFromCamera(false);
+                        pauseLoop();
                     }
-
-                    // Mission complete!
-                    mbot.stopAllBehaviors();
-                    mbot.flashLed(5, 0, 255, 0, 0.3);
-                    currentState = RobotState.STOP;
                     break;
 
-                case STOP:
-                    mbot.stopAllBehaviors();
+                case MISSION_COMPLETE:
                     break;
             }
         }
+
+        stopLineFollowIfNeeded();
+        mbot.stopAllBehaviors();
+        mbot.flashLed(5, 0, 255, 0, 0.3);
+        mbot.stop();
     }
 
     public static void main(String[] args) {
-        try (MazeRobot amazin = new MazeRobot("Vulcans")) {
-            amazin.run();
+        try (MazeRobot robot = new MazeRobot("Vulcans")) {
+            robot.run();
         }
     }
 }

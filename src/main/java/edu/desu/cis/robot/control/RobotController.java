@@ -39,7 +39,13 @@ public abstract class RobotController implements AutoCloseable {
         isClosed = false;
         mbot = new MBot2(service);
         sensors = new SensorCache();
-        telemetry = mbot.registerTelemetry(9991, sensors);
+        TelemetryListener registeredTelemetry = null;
+        try {
+            registeredTelemetry = mbot.registerTelemetry(9991, sensors);
+        } catch (RuntimeException ex) {
+            System.err.println("Telemetry unavailable: " + ex.getMessage());
+        }
+        telemetry = registeredTelemetry;
         Runtime.getRuntime().addShutdownHook(new Thread(this::close));
     }
 
