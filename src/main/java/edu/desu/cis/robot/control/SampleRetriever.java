@@ -134,7 +134,7 @@ public class SampleRetriever extends RobotController {
     }
 
     public static void main(String[] args) {
-        try (SampleRetriever robot = new SampleRetriever("Vulcans")) {
+        try (SampleRetriever robot = new SampleRetriever("Stingbot")) {
             robot.run();
         }
     }

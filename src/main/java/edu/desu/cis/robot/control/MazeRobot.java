@@ -3,7 +3,7 @@ package edu.desu.cis.robot.control;
 import edu.desu.cis.robot.service.SensorSnapshot;
 
 public class MazeRobot extends RobotController {
-    private static final double OBSTACLE_DISTANCE_CM = 14.0;
+    private static final double OBSTACLE_DISTANCE_CM = 15.0;
     private static final double STEER_AROUND_THRESHOLD_CM = 25.0;
     private static final double STEER_AROUND_SPEED = 40.0;
     private static final double STEER_AROUND_DIFF = 20.0;
@@ -136,7 +136,7 @@ public class MazeRobot extends RobotController {
 
     @Override
     public void run() {
-        mbot.avoidCrashing(15);
+        mbot.avoidCrashing(OBSTACLE_DISTANCE_CM);
         mbot.followLine();
 
         while (currentState != RobotState.MISSION_COMPLETE) {
@@ -154,7 +154,7 @@ public class MazeRobot extends RobotController {
                 case IDENTIFY_OBJECT:
 
                     String color = mbot.getColorObjectFromCamera();
-
+                    System.out.println("Color = "+color);
                     if (MOVABLE_COLOR.equals(color)) {
                         mbot.flashLed(1, 0, 255, 0, 0.3);
                         currentState = RobotState.MOVE_OBJECT;
@@ -167,7 +167,7 @@ public class MazeRobot extends RobotController {
                     } else if (INSERTION_POINT_COLOR.equals(color) && carryingSample) {
                         currentState = RobotState.MISSION_COMPLETE;
                     } else {
-                        mbot.avoidCrashing(15);
+                        mbot.avoidCrashing(OBSTACLE_DISTANCE_CM);
                         mbot.followLine();
                         currentState = RobotState.CRUISE;
                     }
@@ -175,15 +175,22 @@ public class MazeRobot extends RobotController {
 
                 case MOVE_OBJECT:
                     mbot.pushObject();
+
+                    double pushdistance = sensor.distance();
+
                     try {
                         Thread.sleep(PUSH_OBJECT_DURATION_MS);
                     } catch (InterruptedException ignored) {
-                        Thread.currentThread().interrupt();
+
                     }
+
+
+
+
                     mbot.stopBehavior("PUSH_OBJECT");
-                    mbot.stop();
-                    resetCruiseBehaviors();
-                    currentState = resumeStateAfterObject();
+                    mbot.avoidCrashing(15);
+                    mbot.followLine();
+                    currentState = RobotState.CRUISE;
                     break;
 
                 case AVOID_OBJECT:
@@ -197,15 +204,21 @@ public class MazeRobot extends RobotController {
                     } catch (InterruptedException ignored) {
                         Thread.currentThread().interrupt();
                     }
-                    mbot.stopBehavior("STEER_AROUND");
-                    mbot.stop();
-                    resetCruiseBehaviors();
-                    currentState = resumeStateAfterObject();
+                    
+
+                    mbot.stopAllBehaviors();
+
+
+                    mbot.avoidCrashing(15);
+                    mbot.followLine();
+                    currentState = RobotState.CRUISE;
                     break;
 
                 case COLLECT_SAMPLE:
-                   // collectSample(distance);
-                    currentState = RobotState.RETURN_TO_BASE;
+                    // collectSample(distance);
+                    mbot.avoidCrashing(15);
+                    mbot.followLine();
+                    currentState = RobotState.CRUISE;
                     break;
 
                 case RETURN_TO_BASE:
@@ -213,12 +226,12 @@ public class MazeRobot extends RobotController {
                         mbot.turnLeft(180);
                         returnHeadingEstablished = true;
                     }
-                    resetCruiseBehaviors();
+                    mbot.avoidCrashing(15);
+                    mbot.followLine();
+                    currentState = RobotState.CRUISE;
 
                     while (currentState == RobotState.RETURN_TO_BASE) {
                         double returnDistance = mbot.readUltrasonic();
-                        startLineFollowIfNeeded();
-
                         String returnColor = readStableCameraColor();
                         if (insertionPointReached(returnColor)) {
                             currentState = RobotState.MISSION_COMPLETE;
@@ -226,7 +239,6 @@ public class MazeRobot extends RobotController {
                         }
 
                         if (isObstacleAhead(returnDistance)) {
-                            stopLineFollowIfNeeded();
                             mbot.stop();
                             currentState = RobotState.IDENTIFY_OBJECT;
                         }
@@ -239,14 +251,13 @@ public class MazeRobot extends RobotController {
             }
         }
 
-        stopLineFollowIfNeeded();
         mbot.stopAllBehaviors();
         mbot.flashLed(5, 0, 255, 0, 0.3);
         mbot.stop();
     }
 
     public static void main(String[] args) {
-        try (MazeRobot robot = new MazeRobot("Vulcans")) {
+        try (MazeRobot robot = new MazeRobot("Stingbot")) {
             robot.run();
         }
     }

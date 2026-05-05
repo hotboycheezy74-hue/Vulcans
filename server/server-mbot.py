@@ -11,7 +11,7 @@ import _thread
 # --- Configuration ---
 WIFI_SSID = "CIS_WiFi"
 WIFI_PASSWORD = "CIS!2018#WiFi"
-ROBOT_ID = "Vulcans"
+ROBOT_ID = "Stingbot"
 DISCOVERY_PORT = 9998
 COMMAND_PORT = 9990
 TELEMETRY_PORT = 9991
@@ -748,11 +748,10 @@ def handle_telemetry(payload):
 def handle_stop_behavior(payload):
     parameters = payload.get("parameters")
     behavior_name = parameters.get("behavior_name")
-    scheduler.stop_behavior(behavior_name)
-    scheduler.wait_until_stopped(behavior_name)
     if arbiter.acquire("motors", "LINE", 180):
         mbot2.forward(speed=0)
         arbiter.release("motors", "LINE")
+    scheduler.stop_behavior(behavior_name)
     return ok_response("Behavior " + behavior_name + " stopped")
 
 
@@ -829,7 +828,6 @@ def avoid_crashing_behavior(threshold):
 def handle_avoid_crashing(payload):
     params = payload.get("parameters", {})
     threshold = params.get("threshold", 15)
-    stop_behaviors_and_wait("STOP_AT_LINE")
     scheduler.start_behavior("AVOID_CRASHING", avoid_crashing_behavior, threshold)
     return ok_response("Avoiding crashes")
 
@@ -854,7 +852,6 @@ def stop_at_line_behavior():
 
 @register_command("STOP_AT_LINE")
 def handle_stop_at_line(payload):
-    stop_behaviors_and_wait("AVOID_CRASHING")
     scheduler.start_behavior("STOP_AT_LINE", stop_at_line_behavior)
     return ok_response("STOP_AT_LINE behavior started")
 
@@ -929,7 +926,6 @@ def handle_steer_around(payload):
         return error_response("INVALID_PARAM", "speed must be between 0 and 100")
     if diff < 0 or diff >= speed:
         return error_response("INVALID_PARAM", "diff must be >= 0 and less than speed")
-    stop_behaviors_and_wait("LINE_FOLLOW", "AVOID_CRASHING", "STOP_AT_LINE", "DETECT_SAMPLE")
     scheduler.start_behavior("STEER_AROUND", steer_around_behavior, threshold, speed, diff)
     return ok_response("STEER_AROUND started")
 
@@ -937,10 +933,6 @@ def handle_steer_around(payload):
 # --- Push Object ---  (FIXED: was incorrectly nested inside handle_stop_at_line)
 @register_command("PUSH_OBJECT")
 def handle_push_object(payload):
-    PUSH_APPROACH_MULTIPLIER = 1.3
-    PUSH_RETURN_MULTIPLIER = 1.5
-    PUSH_CLEAR_SECONDS = 5.0
-    stop_behaviors_and_wait("LINE_FOLLOW", "AVOID_CRASHING", "STOP_AT_LINE", "DETECT_SAMPLE", "STEER_AROUND")
     if not arbiter.acquire("ultrasonic", "PUSH_OBJECT", 100, blocking=True):
         return error_response("RESOURCE_BUSY", "Ultrasonic busy")
     try:
@@ -953,17 +945,12 @@ def handle_push_object(payload):
 
     if arbiter.acquire("motors", "PUSH_OBJECT", 100, blocking=True):
         try:
-            # Turn around so the back of the robot can do the pushing work.
             turn(180)
-            mbot2.straight(-(distance * PUSH_APPROACH_MULTIPLIER))
-            # Push the object out of the lane to the left.
+            mbot2.straight(-(distance * 1.3))
             move_and_turn(speed=40, diff=20, is_left=True)
-            time.sleep(PUSH_CLEAR_SECONDS)
-            # Return a little farther than the straight-in distance so line follow
-            # has a better chance to reacquire the maze path cleanly.
-            mbot2.straight(distance * PUSH_RETURN_MULTIPLIER)
+            time.sleep(4)
+            mbot2.straight(distance * 1.3)
             turn(180)
-            mbot2.drive_speed(0, 0)
             return ok_response("Object pushed")
         finally:
             arbiter.release("motors", "PUSH_OBJECT")
@@ -1004,14 +991,14 @@ line_settle_cycles = 0
 def line_follow_behavior():
     global line_last_status, line_right_turn_mode, line_settle_cycles
 
-    if not arbiter.acquire("line", "LINE_FOLLOW", 300, blocking=False):
+    if not arbiter.acquire("line", "LINE_FOLLOW", 150, blocking=False):
         return
     try:
         status = mbuild.quad_rgb_sensor.get_line_sta()
     finally:
         arbiter.release("line", "LINE_FOLLOW")
 
-    if not arbiter.acquire("motors", "LINE_FOLLOW", 300, blocking=False):
+    if not arbiter.acquire("motors", "LINE_FOLLOW", 150, blocking=False):
         return
     try:
         if status == 0 and line_last_status == 1:
@@ -1053,7 +1040,6 @@ def line_follow_behavior():
 
 @register_command("LINE_FOLLOW")
 def handle_line_follow(payload):
-    stop_behaviors_and_wait("STOP_AT_LINE", "AVOID_CRASHING", "STEER_AROUND")
     scheduler.start_behavior("LINE_FOLLOW", line_follow_behavior)
     return ok_response("Line follow started")
 
@@ -1104,7 +1090,6 @@ def detect_sample_behavior():
 
 @register_command("DETECT_SAMPLE")
 def handle_detect_sample(payload):
-    stop_behaviors_and_wait("STEER_AROUND")
     scheduler.start_behavior("DETECT_SAMPLE", detect_sample_behavior)
     return ok_response("Sample detection started")
 

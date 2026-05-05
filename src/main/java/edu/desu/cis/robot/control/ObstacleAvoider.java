@@ -18,8 +18,22 @@ public class ObstacleAvoider extends RobotController {
             double distance = mbot.readUltrasonic();
             if (distance > 0 && distance <= 15.0) {
                 mbot.stopAllBehaviors();
-                mbot.moveAndTurnLeft(30,2,15);
-                mbot.moveAndTurnRight(30,4,15);
+                mbot.moveAndTurnLeft(30,2,25);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                mbot.moveAndTurnRight(30,2,15);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+                mbot.moveAndTurnRight(30,1,15);
+
+
+
                 break;
             }
             // Flash the LEDs red every time we issue a "heartbeat" check.
@@ -30,7 +44,7 @@ public class ObstacleAvoider extends RobotController {
     }
 
     public static void main(String[] args) {
-        try (ObstacleAvoider robot = new ObstacleAvoider("Vulcans")) {
+        try (ObstacleAvoider robot = new ObstacleAvoider("Stingbot")) {
             robot.run();
         }
     }

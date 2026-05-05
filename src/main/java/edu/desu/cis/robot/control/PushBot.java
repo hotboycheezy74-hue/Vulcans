@@ -10,14 +10,19 @@ public class PushBot extends RobotController {
 
     @Override
     public void run() {
+        mbot.pushObject();
+        //mbot.pushObject();
+        /*
         mbot.avoidCrashing(STOP_THRESHOLD_CM);
         mbot.forward(20);
         while (true) {
             double distance = mbot.readUltrasonic();
             if (distance > 0 && distance <= STOP_THRESHOLD_CM) {
+
                 mbot.turnLeft(180);
-                mbot.straight(-distance * 1.3);
+                mbot.straight(-distance * 1.5);
                 mbot.moveAndTurnRight(-40, 2,20);
+
                 mbot.moveAndTurnRight(40, 2,20);
                 mbot.straight(distance * 1.3);
                 mbot.turnLeft(180);
@@ -26,13 +31,13 @@ public class PushBot extends RobotController {
 
 
                 //find black line again
-                /*
+
                 mbot.stopBehavior("AVOID_CRASHING");
                 mbot.pushObject();
                 mbot.avoidCrashing(STOP_THRESHOLD_CM);
 
                 mbot.moveAndTurnLeft(40, 5,40);
-                */
+
 
                 //when detects object and comes into threshold
 
@@ -46,10 +51,11 @@ public class PushBot extends RobotController {
                 break;
             }
         }
+        */
     }
 
     public static void main(String[] args) {
-        try (PushBot robot = new PushBot("Vulcans")) {
+        try (PushBot robot = new PushBot("Stingbot")) {
             robot.run();
         }
     }
